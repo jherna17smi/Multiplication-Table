@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Antonio's Multiplication's Table Practice App</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root{
+      --lavender:#efe6ff;
+      --brand-blue:#0d6efd;
+      --brand-red:#dc3545;
+    }
+    body{ background: var(--lavender); }
+    /* Blue & red landing bar */
+    .hero{
+      background: linear-gradient(90deg,var(--brand-blue),var(--brand-red));
+      color:#fff;
+      padding: 2.25rem 1rem;
+      border-bottom-left-radius: 1rem;
+      border-bottom-right-radius: 1rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,.15);
+    }
+    .explain p { margin-bottom: .5rem; }
+
+    /* Flashcards */
+    .card-3d{
+      perspective: 1000px;
+      height: 200px;
+      cursor: pointer;
+    }
+    .card-3d-inner{
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.6s;
+      transform-style: preserve-3d;
+    }
+    .card-3d.flipped .card-3d-inner{ transform: rotateY(180deg); }
+    .card-face{
+      position: absolute; inset:0;
+      backface-visibility: hidden;
+      border-radius: 1rem;
+      border: 1px solid rgba(0,0,0,.075);
+      background: #fff;
+      display: flex; align-items: center; justify-content:center;
+      padding: 1rem; text-align:center;
+      box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    }
+    .card-back{ transform: rotateY(180deg); }
+    .q-big{ font-size: clamp(1.25rem, 2.8vw, 1.75rem); font-weight:700; }
+    .ans-big{ font-size: clamp(1.25rem, 2.8vw, 1.75rem); font-weight:700; color: var(--brand-blue); }
+
+    /* Fireworks full-screen canvas */
+    #fw-canvas{
+      position: fixed; inset: 0;
+      pointer-events: none;
+      display: none;
+      z-index: 9999;
+    }
+
+    /* Print tweaks: show results cleanly */
+    @media print{
+      #fw-canvas, .hero, #controls, #apiRow { display:none !important; }
+      .container{ max-width: 100% !important; }
+      .card-3d{ page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="fw-canvas"></canvas>
+
+  <header class="hero">
+    <div class="container">
+      <h1 class="display-6 fw-bold mb-2">Antonio Multiplication Table Practice App</h1>
+      <p class="mb-0">Practice multiplication tables (1–12) with flip cards, score tracking, printable results, and more!</p>
+    </div>
+  </header>
+
+  <main class="container my-4">
+    <!-- Friendly explanation for kids -->
+    <section class="explain bg-white p-3 p-md-4 rounded-4 shadow-sm mb-4">
+      <h2 class="h4">How to Multiply (Kid-Friendly!)</h2>
+      <p><strong>Multiplication</strong> means adding the same number over and over.</p>
+      <ul class="mb-2">
+        <li><strong>3 × 4</strong> means 3 groups of 4: <em>4 + 4 + 4 = 12</em>.</li>
+        <li>Order doesn’t change the answer: <strong>3 × 4 = 4 × 3</strong> (commutative property).</li>
+        <li>Break apart to make it easier: <strong>7 × 6 = 7 × (3 + 3) = 21 + 21 = 42</strong> (associative/distributive idea).</li>
+        <li>Use skip-counting: 5s go 5, 10, 15, 20…</li>
+      </ul>
+      <p class="mb-0">Tip: Look for patterns (like the 9s and 11s) to go faster!</p>
+    </section>
+
+    <!-- Controls -->
+    <section id="controls" class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <button id="regenBtn" class="btn btn-primary">Generate 10 New Cards</button>
+      <button id="fetchBtn" class="btn btn-outline-primary">API: Fetch New Questions</button>
+      <button id="printBtn" class="btn btn-outline-secondary">Print Results & Explanations</button>
+      <div class="ms-auto">
+        <span class="badge text-bg-success" id="scoreBadge">Score: 0/10</span>
+      </div>
+    </section>
+
+    <!-- Flashcards Grid -->
+    <section id="cardsRow" class="row g-3"></section>
+
+    <!-- Results & explanations -->
+    <section id="results" class="bg-white p-3 p-md-4 rounded-4 shadow-sm mt-4" style="display:none;">
+      <h3 class="h5 mb-3">Your Results</h3>
+      <p id="scoreLine" class="mb-2"></p>
+      <div id="explanations" class="mb-3"></div>
+      <button id="playAgainBtn" class="btn btn-success">Play Again</button>
+    </section>
+
+    <!-- API row info -->
+    <section id="apiRow" class="mt-4" style="display:none;">
+      <div class="alert alert-info">Loaded a fresh set of questions from the (mock) API.</div>
+    </section>
+
+    <!-- Multiplication Tables (1 to 12) -->
+    <section class="bg-white p-3 p-md-4 rounded-4 shadow-sm mt-4">
+      <h2 class="h5 mb-3">Multiplication Tables (1–12)</h2>
+      <div id="tables" class="row g-3"></div>
+    </section>
+  </main>
+
+  <footer class="py-4 text-center text-muted">
+    © Copyright Jose A. Hernandez Soto-Front End Developer
+  </footer>
+
+  <script>
+    // ---------------------------
+    // Utility: random questions
+    // ---------------------------
+    function makeQuestion(min=1, max=12){
+      const a = Math.floor(Math.random()*(max-min+1))+min;
+      const b = Math.floor(Math.random()*(max-min+1))+min;
+      return { a, b, answer: a*b, text: `${a} × ${b}` };
+    }
+    function makeTen(){ return Array.from({length:10}, ()=> makeQuestion()); }
+
+    // ---------------------------
+    // Explanations engine
+    // ---------------------------
+    function explain(q){
+      const {a,b,answer} = q;
+      // choose a style
+      const style = Math.floor(Math.random()*3);
+      if(style===0){
+        return `${a} × ${b} means ${a} groups of ${b}: ${Array(a).fill(b).join(" + ")} = ${answer}.`;
+      }else if(style===1){
+        return `Use order doesn’t matter: ${a} × ${b} = ${b} × ${a}. Now skip-count by ${Math.min(a,b)} to reach ${answer}.`;
+      }else{
+        const x = Math.floor(b/2);
+        const y = b - x;
+        return `Break apart ${b} into ${x} + ${y}: ${a} × ${b} = ${a}×${x} + ${a}×${y} = ${a*x} + ${a*y} = ${answer}.`;
+      }
+    }
+
+    // ---------------------------
+    // Fireworks (simple particles)
+    // ---------------------------
+    const fwCanvas = document.getElementById('fw-canvas');
+    const fctx = fwCanvas.getContext('2d');
+    let fwActive = false, particles = [], rafId = null;
+
+    function resizeFW(){
+      fwCanvas.width = window.innerWidth;
+      fwCanvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeFW);
+
+    function launchFireworks(){
+      resizeFW();
+      fwCanvas.style.display = 'block';
+      fwActive = true;
+      particles = [];
+      const colors = ['#ff4d4d','#ffd24d','#4dff88','#4dd2ff','#b84dff'];
+      // create bursts
+      for(let i=0;i<12;i++){
+        const cx = Math.random()*fwCanvas.width;
+        const cy = Math.random()*fwCanvas.height*0.6;
+        const count = 60;
+        for(let j=0;j<count;j++){
+          const angle = (Math.PI*2)* (j/count);
+          const speed = 2 + Math.random()*4;
+          particles.push({
+            x: cx, y: cy,
+            vx: Math.cos(angle)*speed,
+            vy: Math.sin(angle)*speed,
+            life: 60 + Math.random()*30,
+            color: colors[(i+j)%colors.length]
+          });
+        }
+      }
+      animateFW();
+      // stop after 3 seconds
+      setTimeout(stopFireworks, 3000);
+    }
+    function animateFW(){
+      if(!fwActive) return;
+      fctx.clearRect(0,0,fwCanvas.width, fwCanvas.height);
+      for(const p of particles){
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.03; // gravity
+        p.life -= 1;
+        fctx.globalAlpha = Math.max(p.life/90, 0);
+        fctx.fillStyle = p.color;
+        fctx.beginPath();
+        fctx.arc(p.x,p.y,2,0,Math.PI*2);
+        fctx.fill();
+      }
+      particles = particles.filter(p => p.life>0);
+      rafId = requestAnimationFrame(animateFW);
+    }
+    function stopFireworks(){
+      fwActive = false;
+      cancelAnimationFrame(rafId);
+      fwCanvas.style.display = 'none';
+    }
+
+    // ---------------------------
+    // Flashcards + scoring
+    // ---------------------------
+    const cardsRow = document.getElementById('cardsRow');
+    const scoreBadge = document.getElementById('scoreBadge');
+    const results = document.getElementById('results');
+    const scoreLine = document.getElementById('scoreLine');
+    const explanationsBox = document.getElementById('explanations');
+    const playAgainBtn = document.getElementById('playAgainBtn');
+    const apiRow = document.getElementById('apiRow');
+    let questions = [];
+    let revealed = Array(10).fill(false);
+    let correct = 0;
+    let finished = false;
+    let wrongs = [];
+
+    function updateScore(){
+      scoreBadge.textContent = `Score: ${correct}/10`;
+    }
+
+    function finishIfDone(){
+      const allMarked = revealed.every(Boolean);
+      if(allMarked && !finished){
+        finished = true;
+        // Build results UI
+        results.style.display = 'block';
+        scoreLine.textContent = correct===10
+          ? `Perfect! You got all 10 correct.`
+          : `You got ${correct} out of 10 correct.`;
+        explanationsBox.innerHTML = "";
+
+        if(wrongs.length){
+          const list = document.createElement('ol');
+          wrongs.forEach(w => {
+            const li = document.createElement('li');
+            li.className = 'mb-2';
+            li.innerHTML = `<strong>${w.text} = ${w.answer}</strong><br><small>${explain(w)}</small>`;
+            list.appendChild(li);
+          });
+          const lead = document.createElement('p');
+          lead.innerHTML = "<strong>How to fix the ones you missed:</strong>";
+          explanationsBox.appendChild(lead);
+          explanationsBox.appendChild(list);
+        }else{
+          const p = document.createElement('p');
+          p.textContent = "Amazing work! Nothing to review 🎉";
+          explanationsBox.appendChild(p);
+          // Full-screen fireworks
+          launchFireworks();
+        }
+        window.scrollTo({top: results.offsetTop - 80, behavior:'smooth'});
+      }
+    }
+
+    function renderCards(){
+      cardsRow.innerHTML = '';
+      results.style.display = 'none';
+      apiRow.style.display = 'none';
+      correct = 0; revealed = Array(10).fill(false); wrongs = []; finished = false;
+      updateScore();
+
+      questions.forEach((q, idx)=>{
+        const col = document.createElement('div');
+        col.className = 'col-12 col-sm-6 col-lg-4';
+
+        const shell = document.createElement('div');
+        shell.className = 'card-3d';
+        shell.setAttribute('data-idx', idx);
+
+        const inner = document.createElement('div');
+        inner.className = 'card-3d-inner';
+
+        // FRONT
+        const front = document.createElement('div');
+        front.className = 'card-face card-front d-flex flex-column justify-content-between';
+
+        const qText = document.createElement('div');
+        qText.className = 'q-big';
+        qText.textContent = `Q${idx+1}: ${q.text} = ?`;
+
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-outline-dark mt-2';
+        btn.textContent = 'Click me for the answers';
+        btn.addEventListener('click', (ev)=>{
+          ev.stopPropagation();
+          shell.classList.add('flipped');
+        });
+
+        front.append(qText, btn);
+
+        // BACK
+        const back = document.createElement('div');
+        back.className = 'card-face card-back d-flex flex-column';
+
+        const ans = document.createElement('div');
+        ans.className = 'ans-big mb-2';
+        ans.textContent = `${q.text} = ${q.answer}`;
+
+        const explainSmall = document.createElement('small');
+        explainSmall.className = 'text-muted';
+        explainSmall.textContent = 'Mark yourself: did you get it right?';
+
+        const btnRow = document.createElement('div');
+        btnRow.className = 'd-flex gap-2 justify-content-center mt-2';
+        const rightBtn = document.createElement('button');
+        rightBtn.className = 'btn btn-success btn-sm';
+        rightBtn.textContent = 'I was correct';
+        const wrongBtn = document.createElement('button');
+        wrongBtn.className = 'btn btn-danger btn-sm';
+        wrongBtn.textContent = "I need help";
+
+        rightBtn.addEventListener('click', (ev)=>{
+          ev.stopPropagation();
+          if(!revealed[idx]){
+            correct += 1;
+            revealed[idx] = true;
+            updateScore();
+            finishIfDone();
+          }
+        });
+        wrongBtn.addEventListener('click', (ev)=>{
+          ev.stopPropagation();
+          if(!revealed[idx]){
+            revealed[idx] = true;
+            wrongs.push(q);
+            finishIfDone();
+          }
+        });
+
+        btnRow.append(rightBtn, wrongBtn);
+        back.append(ans, explainSmall, btnRow);
+
+        inner.append(front, back);
+        shell.append(inner);
+        col.append(shell);
+        cardsRow.append(col);
+      });
+    }
+
+    // ---------------------------
+    // API (mock) fetch
+    // ---------------------------
+    async function mockFetchQuestions(){
+      // Simulate an API returning 10 brand-new multiplication pairs
+      const payload = { data: makeTen() };
+      // pretend it’s network:
+      await new Promise(res => setTimeout(res, 400));
+      return payload;
+    }
+
+    // ---------------------------
+    // Multiplication tables (1..12)
+    // ---------------------------
+    function renderTables(){
+      const host = document.getElementById('tables');
+      host.innerHTML = '';
+      for(let t=1;t<=12;t++){
+        const col = document.createElement('div');
+        col.className = 'col-12 col-sm-6 col-lg-4';
+        const card = document.createElement('div');
+        card.className = 'card h-100';
+        const body = document.createElement('div');
+        body.className = 'card-body';
+        const h = document.createElement('h5');
+        h.className = 'card-title';
+        h.textContent = `× ${t} Table`;
+        const ul = document.createElement('ul');
+        ul.className = 'list-unstyled small mb-0';
+        for(let i=1;i<=12;i++){
+          const li = document.createElement('li');
+          li.textContent = `${i} × ${t} = ${i*t}`;
+          ul.appendChild(li);
+        }
+        body.append(h, ul);
+        card.append(body);
+        col.append(card);
+        host.append(col);
+      }
+    }
+
+    // ---------------------------
+    // Wire up controls
+    // ---------------------------
+    const regenBtn = document.getElementById('regenBtn');
+    const fetchBtn = document.getElementById('fetchBtn');
+    const printBtn = document.getElementById('printBtn');
+
+    regenBtn.addEventListener('click', ()=>{
+      questions = makeTen();
+      renderCards();
+      window.scrollTo({top: 0, behavior:'smooth'});
+    });
+
+    fetchBtn.addEventListener('click', async ()=>{
+      const res = await mockFetchQuestions();
+      questions = res.data;
+      renderCards();
+      apiRow.style.display = 'block';
+      window.scrollTo({top: 0, behavior:'smooth'});
+    });
+
+    printBtn.addEventListener('click', ()=> window.print());
+    playAgainBtn.addEventListener('click', ()=>{
+      questions = makeTen();
+      renderCards();
+      window.scrollTo({top: 0, behavior:'smooth'});
+    });
+
+    // Init
+    renderTables();
+    questions = makeTen();
+    renderCards();
+  </script>
+</body>
+</html>
